@@ -1,0 +1,1391 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>熱血全壘打王 - 2D 棒球遊戲</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@500;700;900&display=swap" rel="stylesheet">
+    <style>
+        /* 自訂遊戲字體與基礎樣式 */
+        body {
+            font-family: 'Noto Sans TC', sans-serif;
+            background: radial-gradient(circle at center, #1e293b 0%, #0f172a 100%);
+            touch-action: manipulation; /* 防止雙擊縮放 */
+            user-select: none;
+            -webkit-user-select: none;
+            overflow-x: hidden;
+        }
+
+        /* 遊戲畫布容器與陰影 */
+        #game-wrapper {
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6), 0 0 0 4px #334155;
+            border-radius: 1rem;
+            overflow: hidden;
+            position: relative;
+        }
+
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            background-color: #2e7d32;
+        }
+
+        /* 3D 質感揮棒按鈕 */
+        .swing-btn {
+            background: linear-gradient(180deg, #ef4444 0%, #dc2626 100%);
+            box-shadow: 0 6px 0 #991b1b, 0 12px 20px rgba(220, 38, 38, 0.4);
+            transition: all 0.08s ease;
+        }
+        .swing-btn:active, .swing-btn.pressed {
+            transform: translateY(5px);
+            box-shadow: 0 1px 0 #991b1b, 0 4px 10px rgba(220, 38, 38, 0.4);
+        }
+
+        /* 記分板 LED 燈泡發光效果 */
+        .led-strike {
+            background-color: #facc15;
+            box-shadow: 0 0 10px #facc15, 0 0 20px #eab308;
+        }
+        .led-out {
+            background-color: #ef4444;
+            box-shadow: 0 0 10px #ef4444, 0 0 20px #dc2626;
+        }
+        .led-off {
+            background-color: #334155;
+        }
+
+        /* 壘包發光效果 */
+        .base-active {
+            background-color: #f59e0b !important;
+            box-shadow: 0 0 12px #f59e0b;
+        }
+
+        /* 彈出文字動畫 */
+        @keyframes popScale {
+            0% { transform: scale(0.5); opacity: 0; }
+            60% { transform: scale(1.15); opacity: 1; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        .animate-pop {
+            animation: popScale 0.35s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col items-center justify-center p-2 sm:p-4 text-white">
+
+    <!-- 頂部標題與最高分 -->
+    <header class="w-full max-w-2xl flex items-center justify-between mb-2 sm:mb-3 px-2">
+        <div class="flex items-center gap-2">
+            <span class="text-2xl sm:text-3xl">⚾</span>
+            <h1 class="text-xl sm:text-2xl font-black tracking-wider bg-clip-text text-transparent bg-gradient-to-r from-amber-300 via-yellow-400 to-orange-500">
+                熱血全壘打王
+            </h1>
+        </div>
+        <div class="flex items-center gap-3 text-xs sm:text-sm">
+            <div class="bg-slate-800/90 border border-slate-700 px-3 py-1.5 rounded-full flex items-center gap-1.5">
+                <span class="text-slate-400">最高紀錄:</span>
+                <span id="high-score-display" class="font-bold text-amber-400 text-base">0</span>
+            </div>
+            <button id="mute-btn" title="音效開關" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 p-2 rounded-full transition">
+                🔊
+            </button>
+        </div>
+    </header>
+
+    <!-- 電子記分板 HUD -->
+    <section class="w-full max-w-2xl bg-slate-900/95 border-2 border-slate-700 rounded-xl p-2.5 sm:p-3 mb-3 shadow-lg grid grid-cols-12 gap-2 items-center">
+        <!-- 分數與關卡 -->
+        <div class="col-span-5 sm:col-span-4 flex flex-col justify-center border-r border-slate-700/80 pr-2">
+            <div class="flex items-baseline justify-between">
+                <span class="text-xs text-slate-400 font-bold">SCORE 得分</span>
+                <span id="score-display" class="text-2xl sm:text-3xl font-black text-emerald-400 font-mono">0</span>
+            </div>
+            <div class="flex items-center justify-between mt-1">
+                <span class="text-xs text-slate-400">難度等級</span>
+                <span id="level-badge" class="text-xs font-bold px-2 py-0.5 rounded bg-blue-600 text-white">LV.1 新秀聯盟</span>
+            </div>
+        </div>
+
+        <!-- 壘包狀態顯示 -->
+        <div class="col-span-3 sm:col-span-4 flex flex-col items-center justify-center">
+            <div class="relative w-12 h-12 sm:w-14 sm:h-14 flex items-center justify-center">
+                <!-- 二壘 -->
+                <div id="base-2" class="w-3.5 h-3.5 sm:w-4 sm:h-4 bg-slate-700 border border-slate-500 rotate-45 absolute top-1 transition-all duration-300"></div>
+                <!-- 三壘 -->
+                <div id="base-3" class="w-3.5 h-3.5 sm:w-4 sm:h-4 bg-slate-700 border border-slate-500 rotate-45 absolute left-1 transition-all duration-300"></div>
+                <!-- 一壘 -->
+                <div id="base-1" class="w-3.5 h-3.5 sm:w-4 sm:h-4 bg-slate-700 border border-slate-500 rotate-45 absolute right-1 transition-all duration-300"></div>
+                <!-- 本壘 -->
+                <div class="w-3 h-3 bg-white/40 rotate-45 absolute bottom-1"></div>
+            </div>
+            <span class="text-[10px] text-slate-400 mt-0.5">壘上跑者</span>
+        </div>
+
+        <!-- S (好球) 與 O (出局) 燈號 + 球種提示 -->
+        <div class="col-span-4 flex flex-col justify-center border-l border-slate-700/80 pl-2 sm:pl-3 gap-1.5">
+            <div class="flex items-center justify-between">
+                <span class="text-xs font-bold text-yellow-400 w-4">S</span>
+                <div class="flex gap-1.5">
+                    <span id="strike-1" class="w-3 h-3 rounded-full led-off transition-all"></span>
+                    <span id="strike-2" class="w-3 h-3 rounded-full led-off transition-all"></span>
+                </div>
+            </div>
+            <div class="flex items-center justify-between">
+                <span class="text-xs font-bold text-red-400 w-4">O</span>
+                <div class="flex gap-1.5">
+                    <span id="out-1" class="w-3 h-3 rounded-full led-off transition-all"></span>
+                    <span id="out-2" class="w-3 h-3 rounded-full led-off transition-all"></span>
+                </div>
+            </div>
+            <div class="mt-0.5 text-right">
+                <span id="pitch-info" class="text-[11px] font-bold text-cyan-300 bg-cyan-950/80 border border-cyan-800 px-1.5 py-0.5 rounded">準備投球</span>
+            </div>
+        </div>
+    </section>
+
+    <!-- 遊戲主畫布區域 -->
+    <main id="game-wrapper" class="w-full max-w-2xl aspect-[4/3] sm:aspect-[16/11] bg-emerald-800">
+        <canvas id="baseballCanvas"></canvas>
+
+        <!-- 開始遊戲覆蓋層 -->
+        <div id="start-overlay" class="absolute inset-0 bg-slate-950/80 backdrop-blur-sm flex flex-col items-center justify-center p-6 text-center z-20">
+            <div class="text-5xl sm:text-6xl mb-3 animate-bounce">⚾</div>
+            <h2 class="text-2xl sm:text-4xl font-black text-white mb-2 tracking-wide">準備好站上打擊區了嗎？</h2>
+            <p class="text-slate-300 text-xs sm:text-sm max-w-md mb-5 leading-relaxed">
+                抓準時機點擊畫面、按下<span class="text-amber-400 font-bold">「揮棒」按鈕</span>或敲擊<span class="text-amber-400 font-bold">空白鍵 (Space)</span> 擊球！<br>
+                隨著分數提升，投手將解鎖<span class="text-cyan-300 font-bold">曲球、變速球、滑球與魔球</span>，球速也會越來越快！
+            </p>
+            
+            <!-- 難度球種圖鑑 -->
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 w-full max-w-lg mb-6 text-xs">
+                <div class="bg-slate-800/90 border border-slate-700 p-2 rounded-lg">
+                    <div class="font-bold text-emerald-400">LV.1 直球</div>
+                    <div class="text-slate-400 text-[11px]">球路筆直穩定</div>
+                </div>
+                <div class="bg-slate-800/90 border border-slate-700 p-2 rounded-lg">
+                    <div class="font-bold text-sky-400">LV.2 曲球</div>
+                    <div class="text-slate-400 text-[11px]">進壘前大幅橫向彎曲</div>
+                </div>
+                <div class="bg-slate-800/90 border border-slate-700 p-2 rounded-lg">
+                    <div class="font-bold text-amber-400">LV.3 變速球</div>
+                    <div class="text-slate-400 text-[11px]">初速快、進壘突減速</div>
+                </div>
+                <div class="bg-slate-800/90 border border-slate-700 p-2 rounded-lg">
+                    <div class="font-bold text-rose-400">LV.4+ 指叉/滑球</div>
+                    <div class="text-slate-400 text-[11px]">極速下墜與犀利轉折</div>
+                </div>
+            </div>
+
+            <button id="start-btn" class="bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white font-black text-lg sm:text-xl px-8 py-3.5 rounded-full shadow-lg shadow-emerald-600/30 transform transition hover:scale-105 active:scale-95">
+                開始比賽 PLAY BALL!
+            </button>
+        </div>
+
+        <!-- 遊戲結束覆蓋層 -->
+        <div id="gameover-overlay" class="hidden absolute inset-0 bg-slate-950/85 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center z-20">
+            <div class="text-red-500 font-black text-sm tracking-widest uppercase mb-1">THREE OUTS - GAME OVER</div>
+            <h2 class="text-3xl sm:text-4xl font-black text-white mb-4">三出局！比賽結束</h2>
+            
+            <div class="bg-slate-900 border border-slate-700 rounded-2xl p-4 sm:p-5 w-full max-w-sm mb-6 grid grid-cols-2 gap-3">
+                <div class="bg-slate-800/70 p-2.5 rounded-xl">
+                    <div class="text-xs text-slate-400">最終得分</div>
+                    <div id="final-score" class="text-2xl font-black text-emerald-400">0</div>
+                </div>
+                <div class="bg-slate-800/70 p-2.5 rounded-xl">
+                    <div class="text-xs text-slate-400">最高難度</div>
+                    <div id="final-level" class="text-2xl font-black text-amber-400">LV.1</div>
+                </div>
+                <div class="bg-slate-800/70 p-2.5 rounded-xl">
+                    <div class="text-xs text-slate-400">安打總數</div>
+                    <div id="final-hits" class="text-xl font-bold text-sky-400">0</div>
+                </div>
+                <div class="bg-slate-800/70 p-2.5 rounded-xl">
+                    <div class="text-xs text-slate-400">全壘打數</div>
+                    <div id="final-hr" class="text-xl font-bold text-rose-400">0</div>
+                </div>
+            </div>
+
+            <button id="restart-btn" class="bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-white font-black text-lg px-8 py-3.5 rounded-full shadow-lg shadow-orange-600/30 transform transition hover:scale-105 active:scale-95">
+                再戰一局 RESTART
+            </button>
+        </div>
+    </main>
+
+    <!-- 底部操作區 (畫布外部獨立控制按鈕) -->
+    <footer class="w-full max-w-2xl mt-3 sm:mt-4 flex flex-col items-center gap-2">
+        <div class="w-full flex items-center justify-center gap-3">
+            <button id="swing-btn" class="swing-btn w-full sm:w-72 py-3.5 sm:py-4 rounded-2xl font-black text-xl sm:text-2xl tracking-widest text-white flex items-center justify-center gap-2 cursor-pointer">
+                <span>🏏</span>
+                <span>揮棒 SWING!</span>
+            </button>
+        </div>
+        <p class="text-xs text-slate-400 text-center">
+            操作提示：點擊上方紅色按鈕、點擊球場畫面，或按鍵盤 <kbd class="bg-slate-800 border border-slate-600 px-1.5 py-0.5 rounded text-slate-200">Space 空白鍵</kbd> 進行揮棒
+        </p>
+    </footer>
+
+    <script>
+        /**
+         * 熱血全壘打王 - 2D 棒球遊戲核心引擎
+         * 包含 Web Audio 音效合成、漸進式難度球種物理軌跡、打擊判定與球場動畫
+         */
+
+        // ==================== 1. Web Audio API 音效合成系統 ====================
+        class SoundEffects {
+            constructor() {
+                this.ctx = null;
+                this.muted = false;
+            }
+
+            init() {
+                if (!this.ctx) {
+                    const AudioContext = window.AudioContext || window.webkitAudioContext;
+                    this.ctx = new AudioContext();
+                }
+                if (this.ctx.state === 'suspended') {
+                    this.ctx.resume();
+                }
+            }
+
+            toggleMute() {
+                this.muted = !this.muted;
+                return this.muted;
+            }
+
+            // 揮棒破風聲
+            playSwing() {
+                if (this.muted) return;
+                this.init();
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(280, now);
+                osc.frequency.exponentialRampToValueAtTime(75, now + 0.16);
+                gain.gain.setValueAtTime(0.25, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.16);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start(now);
+                osc.stop(now + 0.16);
+            }
+
+            // 清脆擊球聲 (根據力道調整音高)
+            playHit(power = 1) {
+                if (this.muted) return;
+                this.init();
+                const now = this.ctx.currentTime;
+
+                // 木棒撞擊聲
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sine';
+                const baseFreq = 500 + power * 350;
+                osc.frequency.setValueAtTime(baseFreq, now);
+                osc.frequency.exponentialRampToValueAtTime(120, now + 0.12);
+
+                gain.gain.setValueAtTime(0.6, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.12);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start(now);
+                osc.stop(now + 0.12);
+
+                // 白噪音爆裂感
+                const bufferSize = this.ctx.sampleRate * 0.08;
+                const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+                const data = buffer.getChannelData(0);
+                for (let i = 0; i < bufferSize; i++) {
+                    data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufferSize * 0.3));
+                }
+                const noise = this.ctx.createBufferSource();
+                noise.buffer = buffer;
+                const noiseGain = this.ctx.createGain();
+                noiseGain.gain.setValueAtTime(0.4, now);
+                noise.connect(noiseGain);
+                noiseGain.connect(this.ctx.destination);
+                noise.start(now);
+            }
+
+            // 好球/捕手接球聲
+            playStrike() {
+                if (this.muted) return;
+                this.init();
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(160, now);
+                osc.frequency.exponentialRampToValueAtTime(80, now + 0.18);
+                gain.gain.setValueAtTime(0.2, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.18);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start(now);
+                osc.stop(now + 0.18);
+            }
+
+            // 全壘打歡呼與勝利音效
+            playHomeRun() {
+                if (this.muted) return;
+                this.init();
+                const now = this.ctx.currentTime;
+                const notes = [523.25, 659.25, 783.99, 1046.50]; // C5, E5, G5, C6
+                notes.forEach((freq, idx) => {
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+                    osc.type = 'square';
+                    const startTime = now + idx * 0.09;
+                    osc.frequency.setValueAtTime(freq, startTime);
+                    gain.gain.setValueAtTime(0.15, startTime);
+                    gain.gain.exponentialRampToValueAtTime(0.005, startTime + 0.35);
+                    osc.connect(gain);
+                    gain.connect(this.ctx.destination);
+                    osc.start(startTime);
+                    osc.stop(startTime + 0.35);
+                });
+            }
+
+            // 升級提示音
+            playLevelUp() {
+                if (this.muted) return;
+                this.init();
+                const now = this.ctx.currentTime;
+                const notes = [440, 554.37, 659.25, 880];
+                notes.forEach((freq, idx) => {
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+                    osc.type = 'triangle';
+                    const t = now + idx * 0.07;
+                    osc.frequency.setValueAtTime(freq, t);
+                    gain.gain.setValueAtTime(0.2, t);
+                    gain.gain.exponentialRampToValueAtTime(0.01, t + 0.25);
+                    osc.connect(gain);
+                    gain.connect(this.ctx.destination);
+                    osc.start(t);
+                    osc.stop(t + 0.25);
+                });
+            }
+        }
+
+        const sfx = new SoundEffects();
+
+        // ==================== 2. 遊戲狀態與球種難度設定 ====================
+        const canvas = document.getElementById('baseballCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // 難度等級配置表
+        const LEVEL_CONFIGS = [
+            { level: 1, name: "LV.1 新秀聯盟", minScore: 0, speedMult: 1.0, pitches: ['FASTBALL'] },
+            { level: 2, name: "LV.2 職業二軍", minScore: 3, speedMult: 1.15, pitches: ['FASTBALL', 'CURVE'] },
+            { level: 3, name: "LV.3 明星一軍", minScore: 7, speedMult: 1.3, pitches: ['FASTBALL', 'CURVE', 'CHANGEUP'] },
+            { level: 4, name: "LV.4 冠軍賽", minScore: 12, speedMult: 1.48, pitches: ['FASTBALL', 'CURVE', 'CHANGEUP', 'SLIDER'] },
+            { level: 5, name: "LV.5 傳奇殿堂", minScore: 18, speedMult: 1.68, pitches: ['FASTBALL', 'CURVE', 'CHANGEUP', 'SLIDER', 'SPLITTER'] },
+            { level: 6, name: "LV.6 地獄魔王", minScore: 25, speedMult: 1.9, pitches: ['FASTBALL', 'CURVE', 'CHANGEUP', 'SLIDER', 'SPLITTER'] }
+        ];
+
+        const PITCH_NAMES = {
+            'FASTBALL': { label: '🔥 剛猛直球', color: '#34d399' },
+            'CURVE':    { label: '🌀 大曲球',   color: '#38bdf8' },
+            'CHANGEUP': { label: '🐢 變速球',   color: '#fbbf24' },
+            'SLIDER':   { label: '⚡ 犀利滑球', color: '#c084fc' },
+            'SPLITTER': { label: '⬇️ 指叉魔球', color: '#fb7185' }
+        };
+
+        // 遊戲核心變數
+        let gameState = 'START'; // START, PLAYING, GAMEOVER
+        let score = 0;
+        let highScore = parseInt(localStorage.getItem('baseball_high_score') || '0');
+        let strikes = 0;
+        let outs = 0;
+        let bases = [false, false, false]; // 一壘, 二壘, 三壘
+        let currentLevelIdx = 0;
+        let totalHits = 0;
+        let totalHomeRuns = 0;
+
+        // 投手與球體狀態
+        let pitchPhase = 'IDLE'; // IDLE, WINDUP, PITCHING, HIT, RESULT_WAIT
+        let phaseTimer = 0;
+        let currentPitchType = 'FASTBALL';
+        let pitchSpeedKmh = 135;
+
+        // 球體座標 (使用 0.0 ~ 1.0 正規化進度 z，0 = 投手丘, 1 = 本壘板)
+        let ball = {
+            z: 0,
+            xOffset: 0,      // 橫向偏移 (-1 ~ 1)
+            yOffset: 0,      // 垂直下墜偏移
+            curveDir: 1,     // 曲球/滑球方向 (-1 或 1)
+            trail: [],       // 軌跡殘影
+            hitX: 0,         // 被擊出後的畫布 X
+            hitY: 0,         // 被擊出後的畫布 Y
+            hitVx: 0,
+            hitVy: 0,
+            hitVz: 0,        // 飛球高度速度
+            hitHeight: 0,
+            isHomeRun: false
+        };
+
+        // 打者揮棒動畫狀態
+        let batter = {
+            swinging: false,
+            swingProgress: 0, // 0 ~ 1
+            hasSwungThisPitch: false
+        };
+
+        // 視覺特效陣列 (浮動文字、煙火粒子)
+        let floatingTexts = [];
+        let particles = [];
+        let screenShake = 0;
+
+        // ==================== 3. 畫布自適應與座標計算 ====================
+        let width = 800;
+        let height = 550;
+
+        function resizeCanvas() {
+            const container = document.getElementById('game-wrapper');
+            const rect = container.getBoundingClientRect();
+            const dpr = window.devicePixelRatio || 1;
+            canvas.width = rect.width * dpr;
+            canvas.height = rect.height * dpr;
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            width = rect.width;
+            height = rect.height;
+        }
+
+        window.addEventListener('resize', resizeCanvas);
+
+        // 取得關鍵球場位置 (根據當前畫布尺寸動態計算)
+        function getFieldMetrics() {
+            return {
+                centerX: width * 0.5,
+                horizonY: height * 0.34,     // 外野全壘打牆高度
+                moundX: width * 0.5,
+                moundY: height * 0.53,       // 投手丘位置
+                plateX: width * 0.5,
+                plateY: height * 0.86,       // 本壘板位置
+                strikeZoneY: height * 0.83,  // 最佳擊球點 Y
+                batterX: width * 0.39,       // 右打者站位
+                batterY: height * 0.84
+            };
+        }
+
+        // ==================== 4. 遊戲邏輯控制 ====================
+        function updateUI() {
+            document.getElementById('score-display').textContent = score;
+            document.getElementById('high-score-display').textContent = highScore;
+
+            const lvl = LEVEL_CONFIGS[currentLevelIdx];
+            const badge = document.getElementById('level-badge');
+            badge.textContent = lvl.name;
+
+            // 根據等級變換徽章顏色
+            const badgeColors = [
+                'bg-blue-600', 'bg-cyan-600', 'bg-amber-600',
+                'bg-purple-600', 'bg-rose-600', 'bg-red-700 animate-pulse'
+            ];
+            badge.className = `text-xs font-bold px-2 py-0.5 rounded text-white ${badgeColors[currentLevelIdx] || 'bg-red-700'}`;
+
+            // 更新好球燈
+            document.getElementById('strike-1').className = `w-3 h-3 rounded-full transition-all ${strikes >= 1 ? 'led-strike' : 'led-off'}`;
+            document.getElementById('strike-2').className = `w-3 h-3 rounded-full transition-all ${strikes >= 2 ? 'led-strike' : 'led-off'}`;
+
+            // 更新出局燈
+            document.getElementById('out-1').className = `w-3 h-3 rounded-full transition-all ${outs >= 1 ? 'led-out' : 'led-off'}`;
+            document.getElementById('out-2').className = `w-3 h-3 rounded-full transition-all ${outs >= 2 ? 'led-out' : 'led-off'}`;
+
+            // 更新壘包
+            document.getElementById('base-1').classList.toggle('base-active', bases[0]);
+            document.getElementById('base-2').classList.toggle('base-active', bases[1]);
+            document.getElementById('base-3').classList.toggle('base-active', bases[2]);
+        }
+
+        function checkLevelProgression() {
+            let newIdx = 0;
+            for (let i = LEVEL_CONFIGS.length - 1; i >= 0; i--) {
+                if (score >= LEVEL_CONFIGS[i].minScore) {
+                    newIdx = i;
+                    break;
+                }
+            }
+            if (newIdx > currentLevelIdx) {
+                currentLevelIdx = newIdx;
+                sfx.playLevelUp();
+                addFloatingText(`難度提升！${LEVEL_CONFIGS[currentLevelIdx].name}`, width * 0.5, height * 0.35, '#fbbf24', 28);
+            }
+        }
+
+        function startNewGame() {
+            sfx.init();
+            score = 0;
+            strikes = 0;
+            outs = 0;
+            bases = [false, false, false];
+            currentLevelIdx = 0;
+            totalHits = 0;
+            totalHomeRuns = 0;
+            floatingTexts = [];
+            particles = [];
+
+            document.getElementById('start-overlay').classList.add('hidden');
+            document.getElementById('gameover-overlay').classList.add('hidden');
+
+            gameState = 'PLAYING';
+            updateUI();
+            prepareNextPitch(600);
+        }
+
+        function prepareNextPitch(delayMs = 1100) {
+            if (gameState !== 'PLAYING') return;
+            pitchPhase = 'IDLE';
+            phaseTimer = delayMs;
+            batter.swinging = false;
+            batter.swingProgress = 0;
+            batter.hasSwungThisPitch = false;
+            ball.trail = [];
+            document.getElementById('pitch-info').textContent = '投手準備中...';
+            document.getElementById('pitch-info').style.color = '#67e8f9';
+        }
+
+        function beginWindup() {
+            pitchPhase = 'WINDUP';
+            phaseTimer = 650; // 投手抬腿蓄力時間
+
+            // 根據當前難度隨機抽取球種
+            const availablePitches = LEVEL_CONFIGS[currentLevelIdx].pitches;
+            currentPitchType = availablePitches[Math.floor(Math.random() * availablePitches.length)];
+            ball.curveDir = Math.random() < 0.5 ? -1 : 1;
+
+            // 計算球速顯示 (km/h)
+            const mult = LEVEL_CONFIGS[currentLevelIdx].speedMult;
+            let baseKmh = 132 * mult;
+            if (currentPitchType === 'CHANGEUP') baseKmh *= 0.86;
+            if (currentPitchType === 'CURVE') baseKmh *= 0.9;
+            if (currentPitchType === 'SPLITTER') baseKmh *= 0.95;
+            pitchSpeedKmh = Math.round(baseKmh + (Math.random() * 6 - 3));
+
+            // 顯示球種預告 (高難度時延遲提示或隱藏部分提示增加挑戰)
+            const pitchMeta = PITCH_NAMES[currentPitchType];
+            const infoEl = document.getElementById('pitch-info');
+            if (currentLevelIdx >= 4) {
+                infoEl.textContent = `❓ 未知球路 (${pitchSpeedKmh} km/h)`;
+                infoEl.style.color = '#f43f5e';
+            } else {
+                infoEl.textContent = `${pitchMeta.label} (${pitchSpeedKmh} km/h)`;
+                infoEl.style.color = pitchMeta.color;
+            }
+        }
+
+        function releaseBall() {
+            pitchPhase = 'PITCHING';
+            ball.z = 0;
+            ball.xOffset = 0;
+            ball.yOffset = 0;
+            ball.trail = [];
+        }
+
+        // ==================== 5. 揮棒與打擊判定引擎 ====================
+        function triggerSwing() {
+            if (gameState !== 'PLAYING') return;
+            if (batter.hasSwungThisPitch) return;
+
+            batter.swinging = true;
+            batter.swingProgress = 0;
+            batter.hasSwungThisPitch = true;
+            sfx.playSwing();
+
+            // 按鈕視覺回饋
+            const btn = document.getElementById('swing-btn');
+            btn.classList.add('pressed');
+            setTimeout(() => btn.classList.remove('pressed'), 120);
+
+            // 只有在球投出過程中揮棒才進行接觸判定
+            if (pitchPhase === 'PITCHING') {
+                evaluateHitTiming();
+            }
+        }
+
+        function evaluateHitTiming() {
+            // ball.z === 1.0 代表球正好通過本壘板中心
+            // 最佳擊球區間為 z 在 0.90 ~ 1.08 之間
+            const idealZ = 0.99;
+            const diff = ball.z - idealZ; // 負值 = 太早揮棒(拉打)，正值 = 太晚揮棒(推打)
+            const absDiff = Math.abs(diff);
+
+            // 隨著難度提升，甜蜜點容錯稍微收緊
+            const levelTighten = Math.min(0.025, currentLevelIdx * 0.004);
+            const hrWindow = 0.032 - levelTighten * 0.4;
+            const hitWindow = 0.085 - levelTighten;
+            const foulWindow = 0.135;
+
+            const m = getFieldMetrics();
+            const currentPos = getBallScreenPos();
+
+            if (absDiff <= hrWindow) {
+                // 【全壘打 HOME RUN!】
+                launchBall(currentPos.x, currentPos.y, diff, 1.0, true);
+                handleHitResult('HOMERUN', diff);
+            } else if (absDiff <= hitWindow) {
+                // 【安打 HIT!】根據精準度決定一壘、二壘或三壘安打
+                const quality = 1 - (absDiff - hrWindow) / (hitWindow - hrWindow); // 0 ~ 1
+                launchBall(currentPos.x, currentPos.y, diff, 0.55 + quality * 0.35, false);
+                if (quality > 0.72) {
+                    handleHitResult('TRIPLE', diff);
+                } else if (quality > 0.38) {
+                    handleHitResult('DOUBLE', diff);
+                } else {
+                    handleHitResult('SINGLE', diff);
+                }
+            } else if (absDiff <= foulWindow) {
+                // 【界外球 FOUL】
+                launchBall(currentPos.x, currentPos.y, diff < 0 ? -0.25 : 0.25, 0.45, false, true);
+                handleFoulBall();
+            }
+            // 若超過 foulWindow 則為揮棒落空，球會繼續飛進捕手手套判好球
+        }
+
+        function launchBall(startX, startY, timingDiff, power, isHR, isFoul = false) {
+            pitchPhase = 'HIT';
+            ball.hitX = startX;
+            ball.hitY = startY;
+
+            // 根據揮棒早晚決定擊球方向角 (早揮往左外野拉打，晚揮往右外野推打)
+            let sprayAngle = timingDiff * 7.5; // 弧度偏移
+            if (isFoul) {
+                sprayAngle = timingDiff < 0 ? -1.15 : 1.15;
+            }
+
+            const speed = (6.5 + power * 6.5) * (height / 550);
+            ball.hitVx = Math.sin(sprayAngle) * speed;
+            ball.hitVy = -Math.cos(sprayAngle) * speed;
+            ball.hitHeight = 2;
+            ball.hitVz = isHR ? 9.5 : (4.0 + power * 3.5);
+            ball.isHomeRun = isHR;
+
+            sfx.playHit(power);
+            if (isHR) {
+                screenShake = 14;
+                spawnFireworks(startX, startY, 45);
+            } else {
+                screenShake = 5;
+                spawnFireworks(startX, startY, 15);
+            }
+        }
+
+        function handleHitResult(type, timingDiff) {
+            strikes = 0;
+            totalHits++;
+
+            let basesToAdvance = 1;
+            let title = '一壘安打！';
+            let color = '#34d399';
+            let distance = Math.round(65 + Math.random() * 25);
+
+            if (type === 'DOUBLE') {
+                basesToAdvance = 2;
+                title = '二壘安打！！';
+                color = '#38bdf8';
+                distance = Math.round(92 + Math.random() * 18);
+            } else if (type === 'TRIPLE') {
+                basesToAdvance = 3;
+                title = '三壘安打！！！';
+                color = '#fbbf24';
+                distance = Math.round(110 + Math.random() * 12);
+            } else if (type === 'HOMERUN') {
+                basesToAdvance = 4;
+                totalHomeRuns++;
+                title = '🔥 全壘打 HOME RUN!! 🔥';
+                color = '#f43f5e';
+                distance = Math.round(125 + Math.random() * 28);
+                sfx.playHomeRun();
+                setTimeout(() => spawnFireworks(width * 0.5, height * 0.25, 60), 300);
+            }
+
+            // 推進壘包並計算得分
+            let runsScored = advanceRunners(basesToAdvance);
+            score += runsScored;
+
+            if (score > highScore) {
+                highScore = score;
+                localStorage.setItem('baseball_high_score', highScore.toString());
+            }
+
+            addFloatingText(title, width * 0.5, height * 0.45, color, type === 'HOMERUN' ? 32 : 26);
+            addFloatingText(`飛行距離: ${distance}m ${runsScored > 0 ? `(+${runsScored}分)` : ''}`, width * 0.5, height * 0.53, '#ffffff', 16);
+
+            checkLevelProgression();
+            updateUI();
+            prepareNextPitch(type === 'HOMERUN' ? 1800 : 1300);
+        }
+
+        function advanceRunners(basesCount) {
+            let runs = 0;
+            // 現有壘上跑者推進
+            for (let i = 2; i >= 0; i--) {
+                if (bases[i]) {
+                    bases[i] = false;
+                    if (i + basesCount >= 3) {
+                        runs++;
+                    } else {
+                        bases[i + basesCount] = true;
+                    }
+                }
+            }
+            // 打者上壘或回本壘
+            if (basesCount >= 4) {
+                runs++;
+            } else {
+                bases[basesCount - 1] = true;
+            }
+            return runs;
+        }
+
+        function handleFoulBall() {
+            if (strikes < 2) {
+                strikes++;
+            }
+            addFloatingText('界外球 FOUL!', width * 0.5, height * 0.5, '#fbbf24', 24);
+            updateUI();
+            prepareNextPitch(1000);
+        }
+
+        function handleStrikeCall(wasSwinging) {
+            sfx.playStrike();
+            strikes++;
+            const msg = wasSwinging ? '揮棒落空！好球' : '好球進壘！STRIKE';
+            addFloatingText(msg, width * 0.5, height * 0.52, '#facc15', 22);
+
+            if (strikes >= 3) {
+                // 三振出局
+                strikes = 0;
+                outs++;
+                setTimeout(() => {
+                    addFloatingText('三振出局！STRIKE OUT!', width * 0.5, height * 0.42, '#ef4444', 28);
+                }, 250);
+
+                if (outs >= 3) {
+                    updateUI();
+                    setTimeout(endGame, 1100);
+                    return;
+                }
+            }
+
+            updateUI();
+            prepareNextPitch(1100);
+        }
+
+        function endGame() {
+            gameState = 'GAMEOVER';
+            document.getElementById('final-score').textContent = score;
+            document.getElementById('final-level').textContent = `LV.${LEVEL_CONFIGS[currentLevelIdx].level}`;
+            document.getElementById('final-hits').textContent = totalHits;
+            document.getElementById('final-hr').textContent = totalHomeRuns;
+            document.getElementById('gameover-overlay').classList.remove('hidden');
+        }
+
+        // ==================== 6. 物理更新與軌跡計算 ====================
+        function getBallScreenPos() {
+            const m = getFieldMetrics();
+            // 透視插值 (z 從 0 到 1)
+            const t = ball.z;
+            const baseY = m.moundY + (m.strikeZoneY - m.moundY) * Math.pow(t, 1.15);
+            const scale = 0.35 + 0.75 * Math.pow(t, 1.2);
+
+            const screenX = m.centerX + ball.xOffset * (width * 0.14) * scale;
+            const screenY = baseY + ball.yOffset * (height * 0.12) * scale;
+            const radius = Math.max(4, 11 * scale);
+
+            return { x: screenX, y: screenY, r: radius };
+        }
+
+        function update(dt) {
+            if (screenShake > 0) {
+                screenShake *= 0.85;
+                if (screenShake < 0.3) screenShake = 0;
+            }
+
+            // 更新揮棒動畫
+            if (batter.swinging) {
+                batter.swingProgress += dt * 5.2;
+                if (batter.swingProgress >= 1) {
+                    batter.swinging = false;
+                    batter.swingProgress = 1;
+                }
+            }
+
+            // 更新投球流程
+            if (gameState === 'PLAYING') {
+                if (pitchPhase === 'IDLE') {
+                    phaseTimer -= dt * 1000;
+                    if (phaseTimer <= 0) {
+                        beginWindup();
+                    }
+                } else if (pitchPhase === 'WINDUP') {
+                    phaseTimer -= dt * 1000;
+                    if (phaseTimer <= 0) {
+                        releaseBall();
+                    }
+                } else if (pitchPhase === 'PITCHING') {
+                    const mult = LEVEL_CONFIGS[currentLevelIdx].speedMult;
+                    let dz = 0.88 * mult * dt; // 基礎每秒推進進度
+
+                    // 根據不同球種調整速度曲線與變化軌跡
+                    if (currentPitchType === 'CHANGEUP') {
+                        // 變速球：前半段快，後半段(z > 0.55)明顯減速
+                        dz *= ball.z < 0.55 ? 1.12 : 0.58;
+                        ball.yOffset = Math.pow(Math.max(0, ball.z - 0.5), 2) * 0.6;
+                    } else if (currentPitchType === 'CURVE') {
+                        // 曲球：弧線橫向位移 + 些微下墜
+                        dz *= 0.88;
+                        ball.xOffset = Math.sin(ball.z * Math.PI) * 0.85 * ball.curveDir;
+                        ball.yOffset = Math.pow(ball.z, 2) * 0.45;
+                    } else if (currentPitchType === 'SLIDER') {
+                        // 滑球：前期筆直，z > 0.65 後急劇橫向滑出
+                        dz *= 0.98;
+                        if (ball.z > 0.62) {
+                            const breakT = (ball.z - 0.62) / 0.38;
+                            ball.xOffset = Math.pow(breakT, 1.7) * 0.95 * ball.curveDir;
+                        }
+                    } else if (currentPitchType === 'SPLITTER') {
+                        // 指叉球：看似直球，接近本壘前垂直急墜
+                        dz *= 0.96;
+                        if (ball.z > 0.65) {
+                            const dropT = (ball.z - 0.65) / 0.35;
+                            ball.yOffset = Math.pow(dropT, 1.8) * 1.15;
+                        }
+                    }
+
+                    ball.z += dz;
+
+                    // 記錄殘影軌跡
+                    const pos = getBallScreenPos();
+                    ball.trail.push({ x: pos.x, y: pos.y, r: pos.r });
+                    if (ball.trail.length > 8) ball.trail.shift();
+
+                    // 球完全通過捕手後方，未擊中則判好球
+                    if (ball.z >= 1.16) {
+                        pitchPhase = 'RESULT_WAIT';
+                        handleStrikeCall(batter.hasSwungThisPitch);
+                    }
+                } else if (pitchPhase === 'HIT') {
+                    // 更新被擊出飛球的運動軌跡
+                    ball.hitX += ball.hitVx * (dt * 60);
+                    ball.hitY += ball.hitVy * (dt * 60);
+                    ball.hitHeight += ball.hitVz * (dt * 60);
+                    ball.hitVz -= 0.28 * (dt * 60); // 重力加速度
+                    if (ball.hitHeight < 0) {
+                        ball.hitHeight = 0;
+                        ball.hitVz = -ball.hitVz * 0.45; // 落地彈跳
+                        ball.hitVx *= 0.75;
+                        ball.hitVy *= 0.75;
+                    }
+                }
+            }
+
+            // 更新浮動提示文字
+            for (let i = floatingTexts.length - 1; i >= 0; i--) {
+                const ft = floatingTexts[i];
+                ft.y -= 28 * dt;
+                ft.life -= dt;
+                if (ft.life <= 0) floatingTexts.splice(i, 1);
+            }
+
+            // 更新粒子特效
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const p = particles[i];
+                p.x += p.vx * (dt * 60);
+                p.y += p.vy * (dt * 60);
+                p.vy += 0.18 * (dt * 60);
+                p.life -= dt;
+                if (p.life <= 0) particles.splice(i, 1);
+            }
+        }
+
+        function addFloatingText(text, x, y, color = '#ffffff', size = 24) {
+            floatingTexts.push({
+                text, x, y, color, size,
+                life: 1.35,
+                maxLife: 1.35
+            });
+        }
+
+        function spawnFireworks(x, y, count) {
+            const colors = ['#facc15', '#f43f5e', '#38bdf8', '#34d399', '#ffffff'];
+            for (let i = 0; i < count; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const speed = 1.5 + Math.random() * 5.5;
+                particles.push({
+                    x, y,
+                    vx: Math.cos(angle) * speed,
+                    vy: Math.sin(angle) * speed - 2,
+                    color: colors[Math.floor(Math.random() * colors.length)],
+                    size: 2.5 + Math.random() * 3.5,
+                    life: 0.7 + Math.random() * 0.6
+                });
+            }
+        }
+
+        // ==================== 7. 球場與角色繪製系統 ====================
+        function drawStadium() {
+            const m = getFieldMetrics();
+
+            // 1. 天空與遠景觀眾席
+            const skyGrad = ctx.createLinearGradient(0, 0, 0, m.horizonY);
+            skyGrad.addColorStop(0, '#0f172a');
+            skyGrad.addColorStop(1, '#1e3a8a');
+            ctx.fillStyle = skyGrad;
+            ctx.fillRect(0, 0, width, m.horizonY);
+
+            // 球場探照燈
+            drawStadiumLights(width * 0.14, m.horizonY * 0.35);
+            drawStadiumLights(width * 0.86, m.horizonY * 0.35);
+
+            // 觀眾席看台輪廓
+            ctx.fillStyle = '#1e293b';
+            ctx.beginPath();
+            ctx.moveTo(0, m.horizonY);
+            ctx.quadraticCurveTo(m.centerX, m.horizonY - height * 0.14, width, m.horizonY);
+            ctx.fill();
+
+            // 觀眾席點綴燈光
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.18)';
+            for (let x = 20; x < width - 20; x += 18) {
+                const archY = m.horizonY - Math.sin((x / width) * Math.PI) * (height * 0.08);
+                ctx.fillRect(x, archY, 4, 3);
+            }
+
+            // 2. 外野草皮 (雙色條紋質感)
+            const grassGrad = ctx.createLinearGradient(0, m.horizonY, 0, height);
+            grassGrad.addColorStop(0, '#15803d');
+            grassGrad.addColorStop(1, '#166534');
+            ctx.fillStyle = grassGrad;
+            ctx.fillRect(0, m.horizonY, width, height - m.horizonY);
+
+            // 扇形草皮割草紋路
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(0, m.horizonY, width, height - m.horizonY);
+            ctx.clip();
+            for (let i = -5; i <= 5; i++) {
+                if (i % 2 === 0) {
+                    ctx.fillStyle = 'rgba(255, 255, 255, 0.04)';
+                    ctx.beginPath();
+                    ctx.moveTo(m.plateX, m.plateY);
+                    ctx.lineTo(m.centerX + i * (width * 0.16), m.horizonY);
+                    ctx.lineTo(m.centerX + (i + 1) * (width * 0.16), m.horizonY);
+                    ctx.closePath();
+                    ctx.fill();
+                }
+            }
+            ctx.restore();
+
+            // 全壘打牆與黃色全壘打標線
+            ctx.fillStyle = '#064e3b';
+            ctx.fillRect(0, m.horizonY - 6, width, 14);
+            ctx.fillStyle = '#facc15';
+            ctx.fillRect(0, m.horizonY - 8, width, 3);
+
+            // 全壘打牆距離標示
+            ctx.fillStyle = 'rgba(255,255,255,0.6)';
+            ctx.font = 'bold 10px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('100M', width * 0.12, m.horizonY + 5);
+            ctx.fillText('122M', m.centerX, m.horizonY + 5);
+            ctx.fillText('100M', width * 0.88, m.horizonY + 5);
+
+            // 3. 內野紅土區 (扇形)
+            ctx.fillStyle = '#b45309';
+            ctx.beginPath();
+            ctx.moveTo(m.plateX, m.plateY + 30);
+            ctx.lineTo(width * 0.14, m.horizonY + height * 0.16);
+            ctx.quadraticCurveTo(m.centerX, m.horizonY + height * 0.05, width * 0.86, m.horizonY + height * 0.16);
+            ctx.closePath();
+            ctx.fill();
+
+            // 內野草皮鑽石區
+            ctx.fillStyle = '#16a34a';
+            ctx.beginPath();
+            ctx.moveTo(m.plateX, m.plateY - height * 0.08);
+            ctx.lineTo(width * 0.28, m.moundY + 5);
+            ctx.lineTo(m.centerX, m.horizonY + height * 0.12);
+            ctx.lineTo(width * 0.72, m.moundY + 5);
+            ctx.closePath();
+            ctx.fill();
+
+            // 邊線 (界內/界外白線)
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.75)';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.moveTo(m.plateX, m.plateY);
+            ctx.lineTo(0, m.horizonY + height * 0.06);
+            ctx.moveTo(m.plateX, m.plateY);
+            ctx.lineTo(width, m.horizonY + height * 0.06);
+            ctx.stroke();
+
+            // 4. 投手丘
+            ctx.fillStyle = '#92400e';
+            ctx.beginPath();
+            ctx.ellipse(m.moundX, m.moundY + 6, width * 0.075, height * 0.025, 0, 0, Math.PI * 2);
+            ctx.fill();
+            // 投手板
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(m.moundX - 12, m.moundY + 3, 24, 4);
+
+            // 5. 本壘紅土圓圈與打擊區
+            ctx.fillStyle = '#92400e';
+            ctx.beginPath();
+            ctx.ellipse(m.plateX, m.plateY, width * 0.16, height * 0.065, 0, 0, Math.PI * 2);
+            ctx.fill();
+
+            // 左右打擊區白框
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(m.plateX - width * 0.11, m.plateY - height * 0.04, width * 0.055, height * 0.075);
+            ctx.strokeRect(m.plateX + width * 0.055, m.plateY - height * 0.04, width * 0.055, height * 0.075);
+
+            // 本壘板 (五邊形)
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath();
+            ctx.moveTo(m.plateX - 14, m.plateY - 6);
+            ctx.lineTo(m.plateX + 14, m.plateY - 6);
+            ctx.lineTo(m.plateX + 14, m.plateY + 2);
+            ctx.lineTo(m.plateX, m.plateY + 10);
+            ctx.lineTo(m.plateX - 14, m.plateY + 2);
+            ctx.closePath();
+            ctx.fill();
+
+            // 6. 半透明好球帶與最佳擊球點指示框
+            const zoneW = width * 0.11;
+            const zoneH = height * 0.09;
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
+            ctx.setLineDash([4, 4]);
+            ctx.lineWidth = 1.5;
+            ctx.strokeRect(m.plateX - zoneW / 2, m.strikeZoneY - zoneH / 2, zoneW, zoneH);
+            ctx.setLineDash([]);
+        }
+
+        function drawStadiumLights(x, y) {
+            ctx.fillStyle = '#475569';
+            ctx.fillRect(x - 3, y, 6, 45);
+            ctx.fillStyle = '#e2e8f0';
+            ctx.fillRect(x - 16, y - 10, 32, 14);
+            // 光暈
+            const grad = ctx.createRadialGradient(x, y - 3, 2, x, y - 3, 36);
+            grad.addColorStop(0, 'rgba(255, 255, 220, 0.85)');
+            grad.addColorStop(1, 'rgba(255, 255, 220, 0)');
+            ctx.fillStyle = grad;
+            ctx.beginPath();
+            ctx.arc(x, y - 3, 36, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        function drawPitcher() {
+            const m = getFieldMetrics();
+            const px = m.moundX;
+            let py = m.moundY;
+
+            // 蓄力抬腿動作位移
+            let armAngle = 0;
+            if (pitchPhase === 'WINDUP') {
+                const progress = 1 - (phaseTimer / 650);
+                py -= Math.sin(progress * Math.PI) * 6;
+                armAngle = -progress * Math.PI * 0.8;
+            }
+
+            // 投手陰影
+            ctx.fillStyle = 'rgba(0,0,0,0.3)';
+            ctx.beginPath();
+            ctx.ellipse(px, m.moundY + 4, 12, 4, 0, 0, Math.PI * 2);
+            ctx.fill();
+
+            // 身體 (藍白球衣)
+            ctx.fillStyle = '#2563eb';
+            ctx.beginPath();
+            ctx.roundRect(px - 9, py - 26, 18, 20, 5);
+            ctx.fill();
+
+            // 褲子
+            ctx.fillStyle = '#f8fafc';
+            ctx.fillRect(px - 7, py - 8, 6, 10);
+            ctx.fillRect(px + 1, py - 8, 6, 10);
+
+            // 頭部與球帽
+            ctx.fillStyle = '#fed7aa';
+            ctx.beginPath();
+            ctx.arc(px, py - 33, 7, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = '#1d4ed8';
+            ctx.beginPath();
+            ctx.arc(px, py - 35, 7.5, Math.PI, 0);
+            ctx.fill();
+
+            // 投球手臂
+            ctx.save();
+            ctx.translate(px + 9, py - 22);
+            ctx.rotate(armAngle);
+            ctx.strokeStyle = '#2563eb';
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            ctx.moveTo(0, 0);
+            ctx.lineTo(8, 8);
+            ctx.stroke();
+            ctx.restore();
+        }
+
+        function drawBatter() {
+            const m = getFieldMetrics();
+            const bx = m.batterX;
+            const by = m.batterY;
+
+            // 打者陰影
+            ctx.fillStyle = 'rgba(0,0,0,0.35)';
+            ctx.beginPath();
+            ctx.ellipse(bx, by + 6, 18, 6, 0, 0, Math.PI * 2);
+            ctx.fill();
+
+            // 雙腿 (白色球褲 + 紅色長襪)
+            ctx.fillStyle = '#f8fafc';
+            ctx.fillRect(bx - 10, by - 16, 8, 20);
+            ctx.fillRect(bx + 3, by - 16, 8, 20);
+            ctx.fillStyle = '#dc2626';
+            ctx.fillRect(bx - 10, by - 4, 8, 8);
+            ctx.fillRect(bx + 3, by - 4, 8, 8);
+
+            // 上身球衣 (紅白配色)
+            ctx.fillStyle = '#ef4444';
+            ctx.beginPath();
+            ctx.roundRect(bx - 13, by - 44, 27, 30, 7);
+            ctx.fill();
+
+            // 背號
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 11px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('99', bx, by - 25);
+
+            // 頭部與打擊頭盔
+            ctx.fillStyle = '#fed7aa';
+            ctx.beginPath();
+            ctx.arc(bx + 2, by - 53, 10, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = '#b91c1c';
+            ctx.beginPath();
+            ctx.arc(bx + 1, by - 55, 11, Math.PI * 0.9, Math.PI * 2.1);
+            ctx.fill();
+            // 帽沿
+            ctx.fillRect(bx + 4, by - 56, 11, 3);
+
+            // 球棒與揮棒弧光特效
+            ctx.save();
+            ctx.translate(bx + 10, by - 36);
+
+            // 計算球棒旋轉角度
+            let batAngle = -Math.PI * 0.68; // 準備姿勢：舉棒向後
+            if (batter.swinging) {
+                // 快速橫掃過本壘板
+                const ease = 1 - Math.pow(1 - batter.swingProgress, 3);
+                batAngle = -Math.PI * 0.68 + ease * (Math.PI * 1.35);
+
+                // 繪製揮棒殘影弧線
+                if (batter.swingProgress < 0.75) {
+                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.45)';
+                    ctx.lineWidth = 14;
+                    ctx.lineCap = 'round';
+                    ctx.beginPath();
+                    ctx.arc(0, 0, 48, batAngle - 0.6, batAngle);
+                    ctx.stroke();
+                }
+            }
+
+            ctx.rotate(batAngle);
+
+            // 繪製木棒
+            const batGrad = ctx.createLinearGradient(0, -3, 56, 3);
+            batGrad.addColorStop(0, '#78350f');
+            batGrad.addColorStop(0.3, '#d97706');
+            batGrad.addColorStop(1, '#fbbf24');
+            ctx.fillStyle = batGrad;
+            ctx.beginPath();
+            ctx.moveTo(0, -2.5);
+            ctx.lineTo(54, -4.5);
+            ctx.arc(54, 0, 4.5, -Math.PI / 2, Math.PI / 2);
+            ctx.lineTo(0, 2.5);
+            ctx.closePath();
+            ctx.fill();
+
+            ctx.restore();
+        }
+
+        function drawBall() {
+            if (pitchPhase === 'PITCHING') {
+                // 繪製軌跡殘影
+                ball.trail.forEach((pt, idx) => {
+                    const alpha = (idx + 1) / ball.trail.length * 0.35;
+                    ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
+                    ctx.beginPath();
+                    ctx.arc(pt.x, pt.y, pt.r * 0.85, 0, Math.PI * 2);
+                    ctx.fill();
+                });
+
+                const pos = getBallScreenPos();
+
+                // 地面投影陰影
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.28)';
+                ctx.beginPath();
+                ctx.ellipse(pos.x, pos.y + pos.r + 12 * ball.z, pos.r * 0.9, pos.r * 0.4, 0, 0, Math.PI * 2);
+                ctx.fill();
+
+                // 棒球本體
+                drawBaseballSprite(pos.x, pos.y, pos.r);
+
+            } else if (pitchPhase === 'HIT') {
+                // 飛球地面陰影
+                const shadowScale = Math.max(0.3, 1 - ball.hitHeight / 200);
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+                ctx.beginPath();
+                ctx.ellipse(ball.hitX, ball.hitY, 9 * shadowScale, 4 * shadowScale, 0, 0, Math.PI * 2);
+                ctx.fill();
+
+                // 飛球本體 (隨高度縮放並往上偏移)
+                const visualY = ball.hitY - ball.hitHeight;
+                const visualR = Math.max(3.5, 9 * (1 - ball.hitHeight / 320));
+                drawBaseballSprite(ball.hitX, visualY, visualR);
+            }
+        }
+
+        function drawBaseballSprite(x, y, r) {
+            ctx.save();
+            ctx.translate(x, y);
+
+            // 白色球體
+            const grad = ctx.createRadialGradient(-r * 0.3, -r * 0.3, r * 0.1, 0, 0, r);
+            grad.addColorStop(0, '#ffffff');
+            grad.addColorStop(1, '#cbd5e1');
+            ctx.fillStyle = grad;
+            ctx.beginPath();
+            ctx.arc(0, 0, r, 0, Math.PI * 2);
+            ctx.fill();
+
+            // 紅色縫線
+            if (r > 5) {
+                ctx.strokeStyle = '#ef4444';
+                ctx.lineWidth = Math.max(1, r * 0.14);
+                ctx.beginPath();
+                ctx.arc(-r * 0.55, 0, r * 0.65, -0.8, 0.8);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.arc(r * 0.55, 0, r * 0.65, Math.PI - 0.8, Math.PI + 0.8);
+                ctx.stroke();
+            }
+
+            ctx.restore();
+        }
+
+        function drawEffects() {
+            // 繪製粒子煙火
+            particles.forEach(p => {
+                ctx.globalAlpha = Math.max(0, p.life);
+                ctx.fillStyle = p.color;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+                ctx.fill();
+            });
+            ctx.globalAlpha = 1;
+
+            // 繪製浮動文字
+            floatingTexts.forEach(ft => {
+                const alpha = Math.min(1, ft.life * 1.5);
+                ctx.save();
+                ctx.globalAlpha = alpha;
+                ctx.font = `900 ${ft.size}px "Noto Sans TC", sans-serif`;
+                ctx.textAlign = 'center';
+                ctx.lineWidth = 4;
+                ctx.strokeStyle = 'rgba(15, 23, 42, 0.9)';
+                ctx.strokeText(ft.text, ft.x, ft.y);
+                ctx.fillStyle = ft.color;
+                ctx.fillText(ft.text, ft.x, ft.y);
+                ctx.restore();
+            });
+        }
+
+        function render() {
+            ctx.save();
+            // 畫面震動效果
+            if (screenShake > 0) {
+                const dx = (Math.random() - 0.5) * screenShake;
+                const dy = (Math.random() - 0.5) * screenShake;
+                ctx.translate(dx, dy);
+            }
+
+            drawStadium();
+            drawPitcher();
+            drawBall();
+            drawBatter();
+            drawEffects();
+
+            ctx.restore();
+        }
+
+        // ==================== 8. 主遊戲迴圈與事件綁定 ====================
+        let lastTime = 0;
+        function gameLoop(timestamp) {
+            if (!lastTime) lastTime = timestamp;
+            const dt = Math.min(0.05, (timestamp - lastTime) / 1000);
+            lastTime = timestamp;
+
+            update(dt);
+            render();
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        // 事件監聽器設定
+        document.getElementById('start-btn').addEventListener('click', startNewGame);
+        document.getElementById('restart-btn').addEventListener('click', startNewGame);
+
+        const swingBtn = document.getElementById('swing-btn');
+        swingBtn.addEventListener('pointerdown', (e) => {
+            e.preventDefault();
+            triggerSwing();
+        });
+
+        // 點擊畫布也能直接揮棒
+        canvas.addEventListener('pointerdown', (e) => {
+            if (gameState === 'PLAYING') {
+                e.preventDefault();
+                triggerSwing();
+            }
+        });
+
+        // 鍵盤空白鍵控制
+        window.addEventListener('keydown', (e) => {
+            if (e.code === 'Space') {
+                e.preventDefault();
+                if (gameState === 'PLAYING') {
+                    triggerSwing();
+                } else if (gameState === 'START') {
+                    startNewGame();
+                } else if (gameState === 'GAMEOVER') {
+                    startNewGame();
+                }
+            }
+        });
+
+        // 靜音切換
+        const muteBtn = document.getElementById('mute-btn');
+        muteBtn.addEventListener('click', () => {
+            const isMuted = sfx.toggleMute();
+            muteBtn.textContent = isMuted ? '🔇' : '🔊';
+        });
+
+        // 視窗載入完成後啟動遊戲
+        window.onload = function () {
+            resizeCanvas();
+            updateUI();
+            requestAnimationFrame(gameLoop);
+        };
+    </script>
+</body>
+</html>
